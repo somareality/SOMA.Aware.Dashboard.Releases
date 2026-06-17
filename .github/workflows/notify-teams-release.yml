@@ -39,7 +39,7 @@ jobs:
 
           $Version = "v1.0.0-test"
           $ReleaseUrl = "https://github.com/"
-          $Changelog = "# Added`n`n- Example added item`n- Example improvement`n`n# Fixed`n`n- Example bug fix"
+          $Changelog = "### Added`n- Example added item`n- Example improvement`n`n### Fixed`n- Example bug fix"
 
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $githubEvent = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
@@ -62,11 +62,19 @@ jobs:
             $Changelog = "No changelog was provided for this release."
           }
 
+          $Changelog = $Changelog -replace "`r`n", "`n"
+          $Changelog = $Changelog -replace "`r", "`n"
+
+          # Convert markdown headings like "### Added" into bold section labels.
+          # Adds a blank line before each section, but no blank line after it.
           $Changelog = [regex]::Replace(
             $Changelog,
-            '(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$',
-            '**$1**'
+            '(?m)^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*(?:\n[ \t]*)*',
+            "`n`n**`$1**`n"
           )
+
+          # Collapse excessive blank lines, then remove leading/trailing whitespace.
+          $Changelog = [regex]::Replace($Changelog, "(`n){3,}", "`n`n").Trim()
 
           if ($Changelog.Length -gt 1200) {
             $Changelog = $Changelog.Substring(0, 1200) + "`n`n..."
