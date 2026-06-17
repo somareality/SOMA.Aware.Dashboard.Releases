@@ -5,15 +5,12 @@ on:
   release:
     types: [published]
 
-  # Manual test button in GitHub Actions
   workflow_dispatch:
 
 jobs:
   notify:
     runs-on: windows-latest
 
-    # For release events, skip prereleases.
-    # For manual workflow_dispatch tests, still allow the workflow to run.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
 
     steps:
@@ -21,12 +18,17 @@ jobs:
         shell: powershell
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-          PRODUCT_NAME: "Product name"
+
+          # Customize per tool/repo
+          PRODUCT_NAME: "SOMA Aware Dashboard"
+          FRIENDLY_MESSAGE: "Check out this new version of the dashboard!"
+
         run: |
           $ErrorActionPreference = "Stop"
 
           $TeamsWebhookUrl = $env:TEAMS_WEBHOOK_URL
           $ProductName = $env:PRODUCT_NAME
+          $FriendlyMessage = $env:FRIENDLY_MESSAGE
 
           if ([string]::IsNullOrWhiteSpace($TeamsWebhookUrl)) {
             throw "Missing TEAMS_WEBHOOK_URL."
@@ -36,10 +38,23 @@ jobs:
             throw "Missing PRODUCT_NAME."
           }
 
-          # Defaults for manual test runs
+          if ([string]::IsNullOrWhiteSpace($FriendlyMessage)) {
+            $FriendlyMessage = "A new version is now available."
+          }
+
+          # Defaults for manual workflow_dispatch testing
           $Version = "v1.0.0-test"
           $ReleaseUrl = "https://github.com/"
-          $Changelog = "This is a test release notification from GitHub Actions."
+          $Changelog = @"
+# Added
+
+- Example added item
+- Example improvement
+
+# Fixed
+
+- Example bug fix
+"@
 
           # Real values for GitHub release runs
           if ($env:GITHUB_EVENT_NAME -eq "release") {
@@ -63,7 +78,15 @@ jobs:
             $Changelog = "No changelog was provided for this release."
           }
 
-          # Keep the Teams message readable
+          # Make release-body headings smaller than the card's main Changelog header.
+          # Example: "# Added" or "## Fixed" becomes "**Added**" / "**Fixed**".
+          $Changelog = [regex]::Replace(
+            $Changelog,
+            '(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$',
+            '**$1**'
+          )
+
+          # Keep Teams message readable
           if ($Changelog.Length -gt 1200) {
             $Changelog = $Changelog.Substring(0, 1200) + "`n`n..."
           }
@@ -75,34 +98,30 @@ jobs:
             body = @(
               @{
                 type = "TextBlock"
-                text = "New release available"
+                text = "$ProductName $Version"
                 weight = "Bolder"
                 size = "Large"
                 wrap = $true
               },
               @{
                 type = "TextBlock"
-                text = "$ProductName $Version"
-                weight = "Bolder"
-                size = "Medium"
+                text = $FriendlyMessage
                 wrap = $true
-              },
-              @{
-                type = "TextBlock"
-                text = "A new version of $ProductName is now available."
-                wrap = $true
+                spacing = "Small"
               },
               @{
                 type = "TextBlock"
                 text = "Changelog"
                 weight = "Bolder"
-                size = "Medium"
+                size = "ExtraLarge"
                 wrap = $true
+                spacing = "Large"
               },
               @{
                 type = "TextBlock"
                 text = $Changelog
                 wrap = $true
+                spacing = "Small"
               }
             )
             actions = @(
@@ -127,32 +146,10 @@ jobs:
 
           $body = $payload | ConvertTo-Json -Depth 20
 
-          Write-Host "Sending payload with root type:"
-          Write-Host $payload.type
+          Invoke-RestMethod `
+            -Uri $TeamsWebhookUrl `
+            -Method Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body $body
 
-          Write-Host "Sending attachment content type:"
-          Write-Host $payload.attachments[0].content.type
-
-          Write-Host "Payload preview:"
-          Write-Host $body
-
-          try {
-            Invoke-RestMethod `
-              -Uri $TeamsWebhookUrl `
-              -Method Post `
-              -ContentType "application/json; charset=utf-8" `
-              -Body $body
-
-            Write-Host "Teams release notification sent."
-          } catch {
-            $response = $_.Exception.Response
-            if ($response -and $response.GetResponseStream()) {
-              $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
-              $errorBody = $reader.ReadToEnd()
-              if ($errorBody) {
-                Write-Error "Teams webhook request failed with HTTP $([int]$response.StatusCode): $errorBody"
-              }
-            }
-
-            throw
-          }
+          Write-Host "Teams release notification sent."
