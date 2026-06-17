@@ -3,7 +3,6 @@ name: Notify Teams on published release
 on:
   release:
     types: [published]
-
   workflow_dispatch:
 
 jobs:
@@ -14,14 +13,11 @@ jobs:
 
     steps:
       - name: Send Teams release notification
-        shell: powershell
+        shell: pwsh
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-
-          # Customize per tool/repo
           PRODUCT_NAME: "SOMA Aware Dashboard"
           FRIENDLY_MESSAGE: "Check out this new version of the dashboard!"
-
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -41,21 +37,10 @@ jobs:
             $FriendlyMessage = "A new version is now available."
           }
 
-          # Defaults for manual workflow_dispatch testing
           $Version = "v1.0.0-test"
           $ReleaseUrl = "https://github.com/"
-          $Changelog = @"
-# Added
+          $Changelog = "# Added`n`n- Example added item`n- Example improvement`n`n# Fixed`n`n- Example bug fix"
 
-- Example added item
-- Example improvement
-
-# Fixed
-
-- Example bug fix
-"@
-
-          # Real values for GitHub release runs
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $githubEvent = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
             $release = $githubEvent.release
@@ -77,15 +62,12 @@ jobs:
             $Changelog = "No changelog was provided for this release."
           }
 
-          # Make release-body headings smaller than the card's main Changelog header.
-          # Example: "# Added" or "## Fixed" becomes "**Added**" / "**Fixed**".
           $Changelog = [regex]::Replace(
             $Changelog,
             '(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$',
             '**$1**'
           )
 
-          # Keep Teams message readable
           if ($Changelog.Length -gt 1200) {
             $Changelog = $Changelog.Substring(0, 1200) + "`n`n..."
           }
