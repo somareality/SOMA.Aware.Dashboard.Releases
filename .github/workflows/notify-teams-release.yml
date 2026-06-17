@@ -1,4 +1,3 @@
-# .github/workflows/notify-teams-release.yml
 name: Notify Teams on published release
 
 on:
