@@ -1,0 +1,53 @@
+# .github/workflows/notify-teams-release.yml
+name: Notify Teams on published release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    # Skip prereleases if you only want stable user-facing updates
+    if: ${{ github.event.release.prerelease == false }}
+
+    steps:
+      - name: Send Teams chat notification
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+          # Customize this per public release repo/tool
+          PRODUCT_NAME: "Product name"
+
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          MESSAGE=$(jq -n \
+            --arg product "$PRODUCT_NAME" \
+            --arg tag "$RELEASE_TAG" \
+            --arg name "$RELEASE_NAME" \
+            --arg url "$RELEASE_URL" \
+            --arg changelog "$RELEASE_BODY" \
+            '{
+              text:
+                (
+                  "🚀 New release: " + $product + " " + $tag + "\n\n" +
+                  "A new version of " + $product + " is now available.\n\n" +
+                  "🔗 Open release:\n" +
+                  $url + "\n\n" +
+                  "📝 Changelog:\n" +
+                  (
+                    if ($changelog | length) > 0
+                    then $changelog
+                    else "No changelog was provided for this release."
+                    end
+                  )
+                )
+            }')
+
+          curl -X POST "$TEAMS_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$MESSAGE"
