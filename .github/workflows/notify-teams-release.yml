@@ -5,20 +5,22 @@ on:
   release:
     types: [published]
 
+  # Manual test button in GitHub Actions
+  workflow_dispatch:
+
 jobs:
   notify:
     runs-on: windows-latest
 
-    # Remove this line if you also want prereleases to notify users
-    if: ${{ github.event.release.prerelease == false }}
+    # For release events, skip prereleases.
+    # For manual workflow_dispatch tests, still allow the workflow to run.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
 
     steps:
       - name: Send Teams release notification
-        shell: pwsh
+        shell: powershell
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-
-          # Customize this per public release repo/tool
           PRODUCT_NAME: "Product name"
         run: |
           $ErrorActionPreference = "Stop"
@@ -34,16 +36,23 @@ jobs:
             throw "Missing PRODUCT_NAME."
           }
 
-          # Read GitHub release event payload directly
-          $githubEvent = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
-          $release = $githubEvent.release
+          # Defaults for manual test runs
+          $Version = "v1.0.0-test"
+          $ReleaseUrl = "https://github.com/"
+          $Changelog = "This is a test release notification from GitHub Actions."
 
-          $Version = $release.tag_name
-          $ReleaseUrl = $release.html_url
-          $Changelog = $release.body
+          # Real values for GitHub release runs
+          if ($env:GITHUB_EVENT_NAME -eq "release") {
+            $githubEvent = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+            $release = $githubEvent.release
+
+            $Version = $release.tag_name
+            $ReleaseUrl = $release.html_url
+            $Changelog = $release.body
+          }
 
           if ([string]::IsNullOrWhiteSpace($Version)) {
-            throw "Missing release tag."
+            throw "Missing release version."
           }
 
           if ([string]::IsNullOrWhiteSpace($ReleaseUrl)) {
@@ -54,7 +63,7 @@ jobs:
             $Changelog = "No changelog was provided for this release."
           }
 
-          # Keep Teams card readable and below webhook size limits
+          # Keep the Teams message readable
           if ($Changelog.Length -gt 1200) {
             $Changelog = $Changelog.Substring(0, 1200) + "`n`n..."
           }
@@ -66,7 +75,7 @@ jobs:
             body = @(
               @{
                 type = "TextBlock"
-                text = "🚀 New release available"
+                text = "New release available"
                 weight = "Bolder"
                 size = "Large"
                 wrap = $true
@@ -77,41 +86,23 @@ jobs:
                 weight = "Bolder"
                 size = "Medium"
                 wrap = $true
-                spacing = "Small"
               },
               @{
                 type = "TextBlock"
-                text = "A new version of **$ProductName** is now available."
+                text = "A new version of $ProductName is now available."
                 wrap = $true
-                spacing = "Small"
-              },
-              @{
-                type = "FactSet"
-                spacing = "Medium"
-                facts = @(
-                  @{
-                    title = "Product"
-                    value = $ProductName
-                  },
-                  @{
-                    title = "Version"
-                    value = $Version
-                  }
-                )
               },
               @{
                 type = "TextBlock"
-                text = "What changed"
+                text = "Changelog"
                 weight = "Bolder"
                 size = "Medium"
                 wrap = $true
-                spacing = "Medium"
               },
               @{
                 type = "TextBlock"
                 text = $Changelog
                 wrap = $true
-                spacing = "Small"
               }
             )
             actions = @(
@@ -123,7 +114,6 @@ jobs:
             )
           }
 
-          # This wrapper is required by the Teams Workflow webhook
           $payload = @{
             type = "message"
             attachments = @(
@@ -137,14 +127,32 @@ jobs:
 
           $body = $payload | ConvertTo-Json -Depth 20
 
-          # Debug: show the payload shape without exposing the webhook URL
-          Write-Host "Payload being sent to Teams:"
+          Write-Host "Sending payload with root type:"
+          Write-Host $payload.type
+
+          Write-Host "Sending attachment content type:"
+          Write-Host $payload.attachments[0].content.type
+
+          Write-Host "Payload preview:"
           Write-Host $body
 
-          Invoke-RestMethod `
-            -Uri $TeamsWebhookUrl `
-            -Method Post `
-            -ContentType "application/json; charset=utf-8" `
-            -Body $body
+          try {
+            Invoke-RestMethod `
+              -Uri $TeamsWebhookUrl `
+              -Method Post `
+              -ContentType "application/json; charset=utf-8" `
+              -Body $body
 
-          Write-Host "Teams release notification sent."
+            Write-Host "Teams release notification sent."
+          } catch {
+            $response = $_.Exception.Response
+            if ($response -and $response.GetResponseStream()) {
+              $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+              $errorBody = $reader.ReadToEnd()
+              if ($errorBody) {
+                Write-Error "Teams webhook request failed with HTTP $([int]$response.StatusCode): $errorBody"
+              }
+            }
+
+            throw
+          }
