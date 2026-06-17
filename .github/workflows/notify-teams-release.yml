@@ -20,34 +20,81 @@ jobs:
           # Customize this per public release repo/tool
           PRODUCT_NAME: "Product name"
 
-          RELEASE_NAME: ${{ github.event.release.name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_URL: ${{ github.event.release.html_url }}
           RELEASE_BODY: ${{ github.event.release.body }}
         run: |
-          MESSAGE=$(jq -n \
+          # Keep Teams chat readable by trimming very long changelogs
+          CHANGELOG_PREVIEW="$(printf '%s' "$RELEASE_BODY" | head -c 1200)"
+
+          if [ -z "$CHANGELOG_PREVIEW" ]; then
+            CHANGELOG_PREVIEW="No changelog was provided for this release."
+          fi
+
+          CARD=$(jq -n \
             --arg product "$PRODUCT_NAME" \
             --arg tag "$RELEASE_TAG" \
-            --arg name "$RELEASE_NAME" \
             --arg url "$RELEASE_URL" \
-            --arg changelog "$RELEASE_BODY" \
+            --arg changelog "$CHANGELOG_PREVIEW" \
             '{
-              text:
-                (
-                  "🚀 New release: " + $product + " " + $tag + "\n\n" +
-                  "A new version of " + $product + " is now available.\n\n" +
-                  "🔗 Open release:\n" +
-                  $url + "\n\n" +
-                  "📝 Changelog:\n" +
-                  (
-                    if ($changelog | length) > 0
-                    then $changelog
-                    else "No changelog was provided for this release."
-                    end
-                  )
-                )
+              type: "AdaptiveCard",
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              version: "1.4",
+              body: [
+                {
+                  type: "TextBlock",
+                  text: "🚀 New release",
+                  size: "Large",
+                  weight: "Bolder",
+                  wrap: true
+                },
+                {
+                  type: "TextBlock",
+                  text: ($product + " " + $tag),
+                  size: "Medium",
+                  weight: "Bolder",
+                  wrap: true
+                },
+                {
+                  type: "TextBlock",
+                  text: ("A new version of **" + $product + "** is now available."),
+                  wrap: true
+                },
+                {
+                  type: "FactSet",
+                  facts: [
+                    {
+                      title: "Product",
+                      value: $product
+                    },
+                    {
+                      title: "Version",
+                      value: $tag
+                    }
+                  ]
+                },
+                {
+                  type: "TextBlock",
+                  text: "Changelog",
+                  weight: "Bolder",
+                  spacing: "Medium",
+                  wrap: true
+                },
+                {
+                  type: "TextBlock",
+                  text: $changelog,
+                  wrap: true
+                }
+              ],
+              actions: [
+                {
+                  type: "Action.OpenUrl",
+                  title: "Open release",
+                  url: $url
+                }
+              ]
             }')
 
           curl -X POST "$TEAMS_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "$MESSAGE"
+            -d "$CARD"
