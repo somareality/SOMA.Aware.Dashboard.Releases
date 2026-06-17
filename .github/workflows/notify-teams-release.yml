@@ -64,55 +64,146 @@ jobs:
 
           $Changelog = $Changelog -replace "`r`n", "`n"
           $Changelog = $Changelog -replace "`r", "`n"
-
-          # Convert markdown headings like "### Added" into bold section labels.
-          # Adds a blank line before each section, but no blank line after it.
-          $Changelog = [regex]::Replace(
-            $Changelog,
-            '(?m)^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*(?:\n[ \t]*)*',
-            "`n`n**`$1**`n"
-          )
-
-          # Collapse excessive blank lines, then remove leading/trailing whitespace.
-          $Changelog = [regex]::Replace($Changelog, "(`n){3,}", "`n`n").Trim()
+          $Changelog = $Changelog.Trim()
 
           if ($Changelog.Length -gt 1200) {
             $Changelog = $Changelog.Substring(0, 1200) + "`n`n..."
           }
 
+          function Add-TextBlock {
+            param(
+              [System.Collections.Generic.List[object]]$List,
+              [string]$Text,
+              [string]$Weight,
+              [string]$Size,
+              [string]$Spacing
+            )
+
+            $block = @{
+              type = "TextBlock"
+              text = $Text
+              wrap = $true
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($Weight)) {
+              $block.weight = $Weight
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($Size)) {
+              $block.size = $Size
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($Spacing)) {
+              $block.spacing = $Spacing
+            }
+
+            [void]$List.Add($block)
+          }
+
+          function Add-ChangelogBlocks {
+            param(
+              [System.Collections.Generic.List[object]]$List,
+              [string]$Markdown
+            )
+
+            $lines = $Markdown.Split("`n")
+
+            $sections = [System.Collections.Generic.List[object]]::new()
+            $currentHeading = $null
+            $currentLines = [System.Collections.Generic.List[string]]::new()
+
+            foreach ($line in $lines) {
+              if ($line -match '^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$') {
+                if (($null -ne $currentHeading) -or ($currentLines.Count -gt 0)) {
+                  [void]$sections.Add([pscustomobject]@{
+                    Heading = $currentHeading
+                    Lines = @($currentLines)
+                  })
+                  $currentLines.Clear()
+                }
+
+                $currentHeading = $matches[1].Trim()
+              }
+              elseif ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+              }
+              else {
+                [void]$currentLines.Add($line.TrimEnd())
+              }
+            }
+
+            if (($null -ne $currentHeading) -or ($currentLines.Count -gt 0)) {
+              [void]$sections.Add([pscustomobject]@{
+                Heading = $currentHeading
+                Lines = @($currentLines)
+              })
+            }
+
+            $sectionIndex = 0
+
+            foreach ($section in $sections) {
+              if (-not [string]::IsNullOrWhiteSpace($section.Heading)) {
+                $spacing = "Medium"
+
+                if ($sectionIndex -eq 0) {
+                  $spacing = "Small"
+                }
+
+                Add-TextBlock `
+                  -List $List `
+                  -Text $section.Heading `
+                  -Weight "Bolder" `
+                  -Size "Medium" `
+                  -Spacing $spacing
+
+                $sectionIndex++
+              }
+
+              $sectionText = ($section.Lines -join "`n").Trim()
+
+              if (-not [string]::IsNullOrWhiteSpace($sectionText)) {
+                Add-TextBlock `
+                  -List $List `
+                  -Text $sectionText `
+                  -Weight "" `
+                  -Size "" `
+                  -Spacing "None"
+              }
+            }
+          }
+
+          $cardBody = [System.Collections.Generic.List[object]]::new()
+
+          Add-TextBlock `
+            -List $cardBody `
+            -Text "$ProductName $Version" `
+            -Weight "Bolder" `
+            -Size "Large" `
+            -Spacing ""
+
+          Add-TextBlock `
+            -List $cardBody `
+            -Text $FriendlyMessage `
+            -Weight "" `
+            -Size "" `
+            -Spacing "Small"
+
+          Add-TextBlock `
+            -List $cardBody `
+            -Text "Changelog" `
+            -Weight "Bolder" `
+            -Size "ExtraLarge" `
+            -Spacing "Large"
+
+          Add-ChangelogBlocks `
+            -List $cardBody `
+            -Markdown $Changelog
+
           $card = @{
             '$schema' = "http://adaptivecards.io/schemas/adaptive-card.json"
             type = "AdaptiveCard"
             version = "1.4"
-            body = @(
-              @{
-                type = "TextBlock"
-                text = "$ProductName $Version"
-                weight = "Bolder"
-                size = "Large"
-                wrap = $true
-              },
-              @{
-                type = "TextBlock"
-                text = $FriendlyMessage
-                wrap = $true
-                spacing = "Small"
-              },
-              @{
-                type = "TextBlock"
-                text = "Changelog"
-                weight = "Bolder"
-                size = "ExtraLarge"
-                wrap = $true
-                spacing = "Large"
-              },
-              @{
-                type = "TextBlock"
-                text = $Changelog
-                wrap = $true
-                spacing = "Small"
-              }
-            )
+            body = $cardBody
             actions = @(
               @{
                 type = "Action.OpenUrl"
@@ -124,6 +215,8 @@ jobs:
 
           $payload = @{
             type = "message"
+            text = "$ProductName $Version released"
+            summary = "$ProductName $Version released"
             attachments = @(
               @{
                 contentType = "application/vnd.microsoft.card.adaptive"
